@@ -12,13 +12,13 @@ interface GameEngineProps {
 }
 
 const POWER_UP_COST = 100;
+const BOMB_RADIUS = 80;
 
 const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inventory, onOpenShop, volume }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<any | null>(null);
   const requestRef = useRef<number>(0);
   
-  // State for UI tracking
   const [currentTier, setCurrentTier] = useState(0);
   const [nextTier, setNextTier] = useState(Math.floor(Math.random() * 5));
   const [sessionHighestTier, setSessionHighestTier] = useState(0);
@@ -28,15 +28,12 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
   const [deathTimer, setDeathTimer] = useState(0);
   const [shake, setShake] = useState(0);
   
-  // Input tracking
   const activePowerUpRef = useRef<'bomb' | 'wipe' | 'evo' | null>(null);
   const [uiActivePowerUp, setUiActivePowerUp] = useState<'bomb' | 'wipe' | 'evo' | null>(null);
   const touchPointRef = useRef<{ x: number, y: number } | null>(null);
   const [uiTouchPoint, setUiTouchPoint] = useState<{ x: number, y: number } | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
-
-  // Stable refs for game data to avoid draw loop stale closures
   const gameStateRef = useRef(gameState);
   const inventoryRef = useRef(inventory);
   const volumeRef = useRef(volume);
@@ -54,7 +51,6 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     gameStateRef.current = gameState;
     inventoryRef.current = inventory;
     volumeRef.current = volume;
-    
     const newSkin = SKINS.find(s => s.id === gameState.activeSkin) || SKINS[6];
     skinRef.current = newSkin;
 
@@ -132,7 +128,6 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
           
           (newBody as any).sq = 1.5; 
           Composite.add(engine.world, newBody);
-
           setSessionHighestTier(prev => Math.max(prev, newTier));
           setMultiplier(m => {
             const nextM = Math.min(5, m + 1);
@@ -141,7 +136,6 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
             return nextM;
           });
 
-          // Functional updates to guarantee score and coins only increase correctly during merges
           updateGameState(prev => {
             const addedScore = tierInfo.score * 2;
             const addedCoins = Math.ceil(tierInfo.score / 5);
@@ -207,6 +201,15 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
         setDeathTimer(0);
       }
 
+      // Pre-calculate target tier for global highlighting (Wipe/Evo)
+      let targetTierHighlight: number | null = null;
+      const pu = activePowerUpRef.current;
+      const tp = touchPointRef.current;
+      if (tp && (pu === 'wipe' || pu === 'evo')) {
+        const hoveredBody = bodies.find((b: any) => !b.isStatic && Math.hypot(b.position.x - tp.x, b.position.y - tp.y) < b.circleRadius + 15);
+        if (hoveredBody) targetTierHighlight = hoveredBody.tier;
+      }
+
       bodies.forEach((body: any) => {
         if (body.isStatic) return;
 
@@ -219,23 +222,24 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
         ctx.translate(x, y);
         ctx.rotate(body.angle);
 
+        // Highlighting Logic
         let inRange = false;
-        const tp = touchPointRef.current;
-        const pu = activePowerUpRef.current;
         if (tp && pu) {
-          const dist = Math.hypot(x - tp.x, y - tp.y);
-          if (pu === 'bomb' && dist < 80) inRange = true;
-          if (pu === 'wipe' && dist < 120) inRange = true;
-          if (pu === 'evo' && dist < radius + 20) inRange = true;
+          if (pu === 'bomb') {
+            const dist = Math.hypot(x - tp.x, y - tp.y);
+            if (dist < BOMB_RADIUS) inRange = true;
+          } else if (targetTierHighlight !== null && tier === targetTierHighlight) {
+            inRange = true;
+          }
         }
 
         if (inRange) {
           ctx.shadowBlur = glowIntensity + 10;
           ctx.shadowColor = '#fbbf24';
           ctx.strokeStyle = '#fbbf24';
-          ctx.lineWidth = 10;
+          ctx.lineWidth = 8;
           ctx.beginPath();
-          ctx.arc(0, 0, radius + 5, 0, Math.PI * 2);
+          ctx.arc(0, 0, radius + 4, 0, Math.PI * 2);
           ctx.stroke();
         }
 
@@ -284,6 +288,18 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
         ctx.restore();
       });
 
+      // Draw Bomb Area Preview
+      if (tp && pu === 'bomb') {
+        ctx.save();
+        ctx.beginPath();
+        ctx.setLineDash([10, 5]);
+        ctx.arc(tp.x, tp.y, BOMB_RADIUS, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.5)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.restore();
+      }
+
       if (shake > 0) setShake(s => Math.max(0, s - 0.2));
       requestRef.current = requestAnimationFrame(draw);
     };
@@ -312,20 +328,16 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
   const handleRetry = () => {
     if (!engineRef.current) return;
     const { Composite } = (window as any).Matter;
-    
     const bodies = Composite.allBodies(engineRef.current.world);
     bodies.forEach((b: any) => {
       if (!b.isStatic) Composite.remove(engineRef.current.world, b);
     });
-
     setGameOver(false);
     setDeathTimer(0);
     setSessionHighestTier(0);
     setMultiplier(1);
     setCurrentTier(Math.floor(Math.random() * 5));
     setNextTier(Math.floor(Math.random() * 5));
-    
-    // Reset score only, preserves coins and high score
     updateGameState({ score: 0 });
   };
 
@@ -337,7 +349,6 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
 
     const { Composite, Body, Bodies } = (window as any).Matter;
 
-    // Check cost for power-ups
     if (activePowerUpRef.current) {
       if (gameStateRef.current.coins < POWER_UP_COST) {
         activePowerUpRef.current = null;
@@ -351,32 +362,40 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
       
       if (pu === 'bomb') {
         bodies.forEach((b: any) => {
-          if (!b.isStatic && Math.hypot(b.position.x - coords.x, b.position.y - coords.y) < 80) {
+          if (!b.isStatic && Math.hypot(b.position.x - coords.x, b.position.y - coords.y) < BOMB_RADIUS) {
             Composite.remove(engineRef.current.world, b);
             used = true;
           }
         });
-      } else if (pu === 'wipe') {
-        bodies.forEach((b: any) => {
-          if (!b.isStatic && Math.hypot(b.position.x - coords.x, b.position.y - coords.y) < 120) {
-            Composite.remove(engineRef.current.world, b);
-            used = true;
+      } else {
+        // Find selection target
+        const target = bodies.find((b: any) => !b.isStatic && Math.hypot(b.position.x - coords.x, b.position.y - coords.y) < b.circleRadius + 20);
+        if (target) {
+          const selectedTier = target.tier;
+          if (pu === 'wipe') {
+            bodies.forEach((b: any) => {
+              if (!b.isStatic && b.tier === selectedTier) {
+                Composite.remove(engineRef.current.world, b);
+                used = true;
+              }
+            });
+          } else if (pu === 'evo' && selectedTier < 11) {
+            bodies.forEach((b: any) => {
+              if (!b.isStatic && b.tier === selectedTier) {
+                const nextT = TIERS[selectedTier + 1];
+                const currentSkin = skinRef.current;
+                Body.set(b, { 
+                  tier: selectedTier + 1, 
+                  label: nextT.name,
+                  restitution: currentSkin.physics.restitution,
+                  friction: currentSkin.physics.friction
+                });
+                (b as any).sq = 1.8;
+                setSessionHighestTier(prev => Math.max(prev, selectedTier + 1));
+                used = true;
+              }
+            });
           }
-        });
-      } else if (pu === 'evo') {
-        const target = bodies.find((b: any) => !b.isStatic && Math.hypot(b.position.x - coords.x, b.position.y - coords.y) < b.circleRadius + 15);
-        if (target && target.tier < 11) {
-          const nextT = TIERS[target.tier + 1];
-          const currentSkin = skinRef.current;
-          Body.set(target, { 
-            tier: target.tier + 1, 
-            label: nextT.name,
-            restitution: currentSkin.physics.restitution,
-            friction: currentSkin.physics.friction
-          });
-          (target as any).sq = 1.8;
-          setSessionHighestTier(prev => Math.max(prev, target.tier + 1));
-          used = true;
         }
       }
 
@@ -401,7 +420,6 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     
     (newBody as any).sq = 1.5;
     Composite.add(engineRef.current.world, newBody);
-    
     setCurrentTier(nextTier);
     setNextTier(Math.floor(Math.random() * 5));
     setSessionHighestTier(prev => Math.max(prev, currentTier));
@@ -464,6 +482,16 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
         >
           <canvas ref={canvasRef} width={380} height={600} className="w-full h-full" />
           
+          {/* Active Power-up Preview Drag Icon */}
+          {uiTouchPoint && uiActivePowerUp && (
+             <div 
+               className="absolute text-5xl pointer-events-none drop-shadow-2xl z-50 transition-transform" 
+               style={{ left: uiTouchPoint.x - 24, top: uiTouchPoint.y - 24, transform: 'scale(1.2)' }}
+             >
+               {uiActivePowerUp === 'bomb' ? '💣' : uiActivePowerUp === 'wipe' ? '🧹' : '✨'}
+             </div>
+          )}
+
           {uiTouchPoint && !uiActivePowerUp && !gameOver && (
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute w-[2px] h-full bg-white/10 border-l border-dashed border-white/20" style={{ left: uiTouchPoint.x }} />
@@ -488,17 +516,14 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
           {gameOver && (
             <div className="absolute inset-0 bg-zinc-950/95 flex flex-col items-center justify-center p-10 z-[60] pointer-events-auto backdrop-blur-xl">
               <span className="text-white font-black italic text-6xl mb-12 uppercase tracking-tighter text-center">Game Over!</span>
-              
               <div className="space-y-1 text-center mb-8">
                 <div className="text-zinc-500 uppercase font-black text-[10px] tracking-widest">Score</div>
                 <div className="text-7xl font-black text-white jetbrains-mono italic">{gameState.score}</div>
               </div>
-
               <div className="space-y-1 text-center mb-16">
                 <div className="text-zinc-500 uppercase font-black text-[10px] tracking-widest">High Score</div>
                 <div className="text-4xl font-black text-yellow-500 jetbrains-mono italic">{gameState.highScore}</div>
               </div>
-
               <button 
                 onClick={handleRetry} 
                 className="w-full py-6 bg-white text-zinc-950 font-black rounded-[2.5rem] hover:scale-105 active:scale-95 transition-all uppercase tracking-widest text-2xl shadow-[0_0_50px_rgba(255,255,255,0.2)]"
@@ -517,10 +542,10 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
             return (
               <button 
                 key={id} 
-                onPointerUp={(e) => { 
+                onPointerDown={(e) => { 
                   e.stopPropagation(); 
                   if (!canAfford) return;
-                  const nextPu = uiActivePowerUp === id ? null : (id as any);
+                  const nextPu = (id as any);
                   activePowerUpRef.current = nextPu;
                   setUiActivePowerUp(nextPu); 
                 }} 
