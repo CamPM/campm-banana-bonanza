@@ -1,0 +1,5 @@
+{
+  "name": "Banana Bonanza",
+  "description": "A high-fidelity Suika-style merge game with physics scaling, cosmetic skins, and power-ups.",
+  "requestFramePermissions": []
+}
