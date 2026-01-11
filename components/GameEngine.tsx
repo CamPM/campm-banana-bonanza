@@ -1,5 +1,6 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import Matter from 'matter-js';
 import { GameState, CosmeticItem, TierInfo } from '../types';
 import { TIERS, SKINS } from '../constants';
 
@@ -16,7 +17,7 @@ const BOMB_RADIUS = 80;
 
 const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inventory, onOpenShop, volume }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const engineRef = useRef<any | null>(null);
+  const engineRef = useRef<Matter.Engine | null>(null);
   const requestRef = useRef<number>(0);
   
   const [currentTier, setCurrentTier] = useState(0);
@@ -47,7 +48,6 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
   };
 
   useEffect(() => {
-    const { Body, Composite } = (window as any).Matter;
     gameStateRef.current = gameState;
     inventoryRef.current = inventory;
     volumeRef.current = volume;
@@ -55,10 +55,10 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     skinRef.current = newSkin;
 
     if (engineRef.current) {
-      const bodies = Composite.allBodies(engineRef.current.world);
+      const bodies = Matter.Composite.allBodies(engineRef.current.world);
       bodies.forEach((body: any) => {
         if (!body.isStatic && body.tier !== undefined) {
-          Body.set(body, {
+          Matter.Body.set(body, {
             restitution: newSkin.physics.restitution,
             friction: newSkin.physics.friction
           });
@@ -93,7 +93,7 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
   }, []);
 
   useEffect(() => {
-    const { Engine, Runner, Bodies, Composite, Events } = (window as any).Matter;
+    const { Engine, Runner, Bodies, Composite, Events } = Matter;
     const engine = Engine.create({ enableSleeping: false });
     engineRef.current = engine;
 
@@ -169,14 +169,13 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const { Composite } = (window as any).Matter;
     const width = 380;
     const height = 600;
 
     const draw = () => {
       if (!engineRef.current || gameOver) return;
       
-      const bodies = Composite.allBodies(engineRef.current.world);
+      const bodies = Matter.Composite.allBodies(engineRef.current.world);
       const time = Date.now() / 1000;
       const glowIntensity = Math.sin(time * 6) * 10 + 20;
 
@@ -327,7 +326,7 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
 
   const handleRetry = () => {
     if (!engineRef.current) return;
-    const { Composite } = (window as any).Matter;
+    const { Composite } = Matter;
     const bodies = Composite.allBodies(engineRef.current.world);
     bodies.forEach((b: any) => {
       if (!b.isStatic) Composite.remove(engineRef.current.world, b);
@@ -347,7 +346,7 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     const coords = getMappedCoords(e);
     if (!coords || !engineRef.current) return;
 
-    const { Composite, Body, Bodies } = (window as any).Matter;
+    const { Composite, Body, Bodies } = Matter;
 
     if (activePowerUpRef.current) {
       if (gameStateRef.current.coins < POWER_UP_COST) {
