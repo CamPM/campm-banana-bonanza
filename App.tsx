@@ -51,7 +51,6 @@ const App: React.FC = () => {
     localStorage.setItem('banana_bonanza_settings', JSON.stringify(settings));
   }, [settings]);
 
-  // Enhanced updateGameState to support functional updates for strict monotonicity
   const updateGameState = useCallback((updates: Partial<GameState> | ((prev: GameState) => Partial<GameState>)) => {
     setGameState(prev => {
       const patch = typeof updates === 'function' ? updates(prev) : updates;
@@ -78,7 +77,7 @@ const App: React.FC = () => {
     };
     const key = keyMap[category];
     if (key) {
-      setGameState(prev => ({ ...prev, [key]: itemId }));
+      setGameState(prev => ({ ...prev, [key]: itemId } as GameState));
     }
   };
 
@@ -93,11 +92,8 @@ const App: React.FC = () => {
       if (request) {
         request.call(doc).catch((err: any) => {
           console.error(err);
-          alert("Fullscreen request failed.");
         });
         setSettings(prev => ({ ...prev, isFullscreen: true }));
-      } else {
-        alert("Fullscreen is not supported on this device or browser.");
       }
     } else {
       const exit = docExit.exitFullscreen || docExit.webkitExitFullscreen || docExit.mozCancelFullScreen || docExit.msExitFullscreen;

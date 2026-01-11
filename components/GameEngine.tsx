@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Matter from 'matter-js';
-import { GameState, CosmeticItem, TierInfo } from '../types';
+import { GameState, CosmeticItem } from '../types';
 import { TIERS, SKINS } from '../constants';
 
 interface GameEngineProps {
@@ -10,6 +10,19 @@ interface GameEngineProps {
   inventory: CosmeticItem[];
   onOpenShop: () => void;
   volume: number;
+}
+
+// Extend Matter.Body for local usage with type casting
+// Explicitly define core properties that are sometimes missing from the base Matter.Body type inference
+interface ExtendedBody extends Matter.Body {
+  tier?: number;
+  sq?: number;
+  circleRadius?: number;
+  isStatic: boolean;
+  label: string;
+  position: { x: number; y: number };
+  angle: number;
+  id: number;
 }
 
 const POWER_UP_COST = 100;
@@ -56,9 +69,11 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
 
     if (engineRef.current) {
       const bodies = Matter.Composite.allBodies(engineRef.current.world);
-      bodies.forEach((body: any) => {
-        if (!body.isStatic && body.tier !== undefined) {
-          Matter.Body.set(body, {
+      bodies.forEach((body) => {
+        // Correctly cast to ExtendedBody to check properties
+        const b = body as ExtendedBody;
+        if (!b.isStatic && b.tier !== undefined) {
+          Matter.Body.set(b, {
             restitution: newSkin.physics.restitution,
             friction: newSkin.physics.friction
           });
@@ -105,8 +120,8 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     Events.on(engine, 'collisionStart', (event: any) => {
       const pairs = event.pairs;
       for (const pair of pairs) {
-        const bodyA = pair.bodyA;
-        const bodyB = pair.bodyB;
+        const bodyA = pair.bodyA as ExtendedBody;
+        const bodyB = pair.bodyB as ExtendedBody;
 
         if (bodyA.label === bodyB.label && bodyA.tier !== undefined && (bodyA.tier as number) < 11) {
           const tier = bodyA.tier as number;
@@ -121,12 +136,13 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
           
           const newBody = Bodies.circle(midX, midY, tierInfo.radius, {
             label: tierInfo.name,
-            tier: newTier,
             restitution: currentSkin.physics.restitution,
             friction: currentSkin.physics.friction,
-          });
+          }) as ExtendedBody;
           
-          (newBody as any).sq = 1.5; 
+          newBody.tier = newTier;
+          newBody.sq = 1.5; 
+          newBody.circleRadius = tierInfo.radius;
           Composite.add(engine.world, newBody);
           setSessionHighestTier(prev => Math.max(prev, newTier));
           setMultiplier(m => {
@@ -175,14 +191,14 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     const draw = () => {
       if (!engineRef.current || gameOver) return;
       
-      const bodies = Matter.Composite.allBodies(engineRef.current.world);
+      const bodies = Matter.Composite.allBodies(engineRef.current.world) as ExtendedBody[];
       const time = Date.now() / 1000;
       const glowIntensity = Math.sin(time * 6) * 10 + 20;
 
       ctx.clearRect(0, 0, width, height);
 
       let touchingDeath = false;
-      bodies.forEach((body: any) => {
+      bodies.forEach((body) => {
         if (!body.isStatic) {
           if (!body.sq) body.sq = 1.0;
           if (body.sq > 1.0) body.sq -= 0.015;
@@ -200,28 +216,26 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
         setDeathTimer(0);
       }
 
-      // Pre-calculate target tier for global highlighting (Wipe/Evo)
       let targetTierHighlight: number | null = null;
       const pu = activePowerUpRef.current;
       const tp = touchPointRef.current;
       if (tp && (pu === 'wipe' || pu === 'evo')) {
-        const hoveredBody = bodies.find((b: any) => !b.isStatic && Math.hypot(b.position.x - tp.x, b.position.y - tp.y) < b.circleRadius + 15);
-        if (hoveredBody) targetTierHighlight = hoveredBody.tier;
+        const hoveredBody = bodies.find((b) => !b.isStatic && Math.hypot(b.position.x - tp.x, b.position.y - tp.y) < (b.circleRadius || 0) + 15);
+        if (hoveredBody) targetTierHighlight = hoveredBody.tier ?? null;
       }
 
-      bodies.forEach((body: any) => {
+      bodies.forEach((body) => {
         if (body.isStatic) return;
 
         const { x, y } = body.position;
-        const radius = body.circleRadius * (body.sq || 1.0);
-        const tier = (body.tier as number) || 0;
+        const radius = (body.circleRadius || 15) * (body.sq || 1.0);
+        const tier = body.tier || 0;
         const emoji = skinRef.current.emojis[tier] || '❓';
         
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(body.angle);
 
-        // Highlighting Logic
         let inRange = false;
         if (tp && pu) {
           if (pu === 'bomb') {
@@ -287,7 +301,6 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
         ctx.restore();
       });
 
-      // Draw Bomb Area Preview
       if (tp && pu === 'bomb') {
         ctx.save();
         ctx.beginPath();
@@ -328,8 +341,10 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     if (!engineRef.current) return;
     const { Composite } = Matter;
     const bodies = Composite.allBodies(engineRef.current.world);
-    bodies.forEach((b: any) => {
-      if (!b.isStatic) Composite.remove(engineRef.current.world, b);
+    bodies.forEach((b) => {
+      // Cast to ExtendedBody for correctly reading isStatic
+      const body = b as ExtendedBody;
+      if (!body.isStatic) Composite.remove(engineRef.current!.world, body);
     });
     setGameOver(false);
     setDeathTimer(0);
@@ -355,41 +370,41 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
         return;
       }
 
-      const bodies = Composite.allBodies(engineRef.current.world);
+      const bodies = Composite.allBodies(engineRef.current.world) as ExtendedBody[];
       const pu = activePowerUpRef.current;
       let used = false;
       
       if (pu === 'bomb') {
-        bodies.forEach((b: any) => {
+        bodies.forEach((b) => {
           if (!b.isStatic && Math.hypot(b.position.x - coords.x, b.position.y - coords.y) < BOMB_RADIUS) {
-            Composite.remove(engineRef.current.world, b);
+            Composite.remove(engineRef.current!.world, b);
             used = true;
           }
         });
       } else {
-        // Find selection target
-        const target = bodies.find((b: any) => !b.isStatic && Math.hypot(b.position.x - coords.x, b.position.y - coords.y) < b.circleRadius + 20);
+        const target = bodies.find((b) => !b.isStatic && Math.hypot(b.position.x - coords.x, b.position.y - coords.y) < (b.circleRadius || 0) + 20);
         if (target) {
           const selectedTier = target.tier;
           if (pu === 'wipe') {
-            bodies.forEach((b: any) => {
+            bodies.forEach((b) => {
               if (!b.isStatic && b.tier === selectedTier) {
-                Composite.remove(engineRef.current.world, b);
+                Composite.remove(engineRef.current!.world, b);
                 used = true;
               }
             });
-          } else if (pu === 'evo' && selectedTier < 11) {
-            bodies.forEach((b: any) => {
+          } else if (pu === 'evo' && selectedTier !== undefined && selectedTier < 11) {
+            bodies.forEach((b) => {
               if (!b.isStatic && b.tier === selectedTier) {
                 const nextT = TIERS[selectedTier + 1];
                 const currentSkin = skinRef.current;
                 Body.set(b, { 
-                  tier: selectedTier + 1, 
                   label: nextT.name,
                   restitution: currentSkin.physics.restitution,
                   friction: currentSkin.physics.friction
                 });
-                (b as any).sq = 1.8;
+                b.tier = selectedTier + 1;
+                b.sq = 1.8;
+                b.circleRadius = nextT.radius;
                 setSessionHighestTier(prev => Math.max(prev, selectedTier + 1));
                 used = true;
               }
@@ -412,12 +427,13 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
     
     const newBody = Bodies.circle(coords.x, 50, tierInfo.radius, {
       label: tierInfo.name,
-      tier: currentTier,
       restitution: currentSkin.physics.restitution,
       friction: currentSkin.physics.friction,
-    });
+    }) as ExtendedBody;
     
-    (newBody as any).sq = 1.5;
+    newBody.tier = currentTier;
+    newBody.sq = 1.5;
+    newBody.circleRadius = tierInfo.radius;
     Composite.add(engineRef.current.world, newBody);
     setCurrentTier(nextTier);
     setNextTier(Math.floor(Math.random() * 5));
@@ -481,7 +497,6 @@ const GameEngine: React.FC<GameEngineProps> = ({ gameState, updateGameState, inv
         >
           <canvas ref={canvasRef} width={380} height={600} className="w-full h-full" />
           
-          {/* Active Power-up Preview Drag Icon */}
           {uiTouchPoint && uiActivePowerUp && (
              <div 
                className="absolute text-5xl pointer-events-none drop-shadow-2xl z-50 transition-transform" 
