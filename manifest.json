@@ -1,0 +1,18 @@
+
+{
+  "short_name": "Bonanza",
+  "name": "Banana Bonanza: Physics Merge",
+  "description": "A high-fidelity Suika-style physics merge game with scalable restitution and unique cosmetic themes.",
+  "icons": [
+    {
+      "src": "https://api.iconify.design/noto:banana.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "./index.html",
+  "display": "standalone",
+  "theme_color": "#09090b",
+  "background_color": "#09090b",
+  "orientation": "portrait"
+}
